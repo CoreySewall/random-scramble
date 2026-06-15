@@ -1,0 +1,351 @@
+@page "/"
+@inject HttpClient Http
+@inject IJSRuntime JS
+
+<PageTitle>Random Team Generator</PageTitle>
+
+<header class="app-header">
+    <h1>🎲 Random Team Generator</h1>
+    <p class="app-subtitle">Enter players and scores, then click Randomize to build teams.</p>
+</header>
+
+<div class="controls-bar">
+    <div class="team-size-group">
+        <span class="bar-label">Team Size:</span>
+        <input type="number" class="team-size-input"
+               value="@_teamSize"
+               @onchange="@(e => { if (int.TryParse(e.Value?.ToString(), out var v) && v >= 1) _teamSize = v; })"
+               min="1" max="50" />
+    </div>
+    <button class="btn-randomize" @onclick="Randomize">🎲 Randomize!</button>
+    <button class="btn-clear" @onclick="ClearAll">🗑 Clear All</button>
+    <div class="click-counter">
+        Randomized <span class="counter-num">@_clickCount</span> times this session
+    </div>
+</div>
+
+<div class="groupme-bar">
+    <span class="bar-label">GroupMe Bot ID:</span>
+    <input type="text" class="bot-id-input"
+           value="@_botId"
+           @oninput="@(e => _botId = e.Value?.ToString() ?? "")"
+           placeholder="Paste your Bot ID here" />
+    <label class="auto-post-label">
+        <input type="checkbox" checked="@_autoPost" @onchange="OnAutoPostChanged" />
+        Auto-post when randomizing
+    </label>
+    <span class="gm-hint">Create a bot at dev.groupme.com</span>
+</div>
+
+<main>
+    <section class="results-section">
+        <h2 class="section-title">Results</h2>
+
+        @if (_results.Count == 0)
+        {
+            <div class="empty-state">
+                <div class="empty-icon">🎲</div>
+                <div class="empty-title">No results yet</div>
+                <div class="empty-sub">Add your players below and click Randomize!</div>
+            </div>
+        }
+
+        @foreach (var result in _results)
+        {
+            <div class="result-card" @key="result.Iteration">
+                <div class="result-header">
+                    <span class="result-title">Randomization #@result.Iteration</span>
+                    <div class="result-header-right">
+                        <span class="result-time">@result.Time</span>
+                        <button class="btn-groupme" @onclick="@(() => SendToGroupMe(result))">📤 GroupMe</button>
+                    </div>
+                </div>
+
+                @if (result.IsUneven)
+                {
+                    <div class="warning-banner">
+                        <div class="warning-bar"></div>
+                        <div class="warning-text">⚠️ Are you missing a player? Total player count makes uneven teams.</div>
+                    </div>
+                }
+
+                <div class="teams-grid">
+                    @foreach (var team in result.Teams)
+                    {
+                        <div class="team-card @(team.IsWinner ? "team-winner" : "")">
+                            <div class="team-header" style="background: @team.Color">
+                                <span class="team-name">Team @team.Number</span>
+                                @if (team.IsWinner)
+                                {
+                                    <span class="winner-badge">🏆 Winner</span>
+                                }
+                            </div>
+                            <div class="team-players">
+                                @foreach (var p in team.Players)
+                                {
+                                    <div class="player-line">
+                                        <span class="pl-name">@p.Name</span>
+                                        <span class="pl-score">@FormatScore(p.Score)</span>
+                                    </div>
+                                }
+                            </div>
+                            <div class="team-total">
+                                <span class="total-label">Team Total:</span>
+                                <span class="total-value">@FormatScore(team.Total)</span>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </section>
+
+    <section class="player-sheet">
+        <div class="sheet-heading">
+            <h2 class="section-title">Player Entry Sheet</h2>
+            <span class="player-count">@_players.Count player@(_players.Count == 1 ? "" : "s")</span>
+        </div>
+
+        <div class="col-headers">
+            <span class="col-num">#</span>
+            <span class="col-name">PLAYER NAME</span>
+            <span class="col-score">SCORE</span>
+            <span></span>
+        </div>
+
+        <div class="player-list" id="playerList">
+            @for (int i = 0; i < _players.Count; i++)
+            {
+                var player = _players[i];
+                var rowNum = i + 1;
+                <div class="player-row" @key="player.Id">
+                    <span class="row-num">@rowNum</span>
+                    <input type="text" class="name-input"
+                           value="@player.Name"
+                           @oninput="@(e => player.Name = e.Value?.ToString() ?? "")"
+                           placeholder="Player name"
+                           data-player-id="@player.Id" />
+                    <input type="text" class="score-input"
+                           value="@player.ScoreText"
+                           @oninput="@(e => player.ScoreText = e.Value?.ToString() ?? "0")"
+                           inputmode="decimal"
+                           placeholder="0" />
+                    <button class="btn-remove" @onclick="@(() => RemovePlayer(player.Id))" tabindex="-1">✕</button>
+                </div>
+            }
+        </div>
+
+        <div class="sheet-footer">
+            <button class="btn-add" @onclick="AddPlayer">+ Add Player</button>
+        </div>
+    </section>
+</main>
+
+@code {
+    private class PlayerEntry
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string ScoreText { get; set; } = "0";
+        public double Score => double.TryParse(ScoreText, out var s) ? s : 0;
+    }
+
+    private class PlayerSnapshot
+    {
+        public string Name { get; set; } = "";
+        public double Score { get; set; }
+    }
+
+    private class TeamResult
+    {
+        public int Number { get; set; }
+        public List<PlayerSnapshot> Players { get; set; } = new();
+        public double Total { get; set; }
+        public bool IsWinner { get; set; }
+        public string Color { get; set; } = "#6366F1";
+    }
+
+    private class RandomizationResult
+    {
+        public int Iteration { get; set; }
+        public string Time { get; set; } = "";
+        public List<TeamResult> Teams { get; set; } = new();
+        public bool IsUneven { get; set; }
+    }
+
+    private static readonly string[] TeamColors =
+    {
+        "#6366F1", "#EC4899", "#10B981", "#F59E0B", "#3B82F6",
+        "#8B5CF6", "#EF4444", "#14B8A6", "#F97316", "#84CC16"
+    };
+
+    private List<PlayerEntry> _players = new();
+    private List<RandomizationResult> _results = new();
+    private int _clickCount;
+    private int _nextId = 1;
+    private int _teamSize = 2;
+    private string _botId = "";
+    private bool _autoPost;
+
+    protected override void OnInitialized()
+    {
+        for (int i = 1; i <= 6; i++)
+            _players.Add(new PlayerEntry { Id = _nextId++, Name = $"Player{i}", ScoreText = "0" });
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _botId = await JS.InvokeAsync<string?>("localStorage.getItem", "rs_botid") ?? "";
+        var ap = await JS.InvokeAsync<string?>("localStorage.getItem", "rs_autopost");
+        _autoPost = ap == "1";
+        StateHasChanged();
+    }
+
+    private async Task SaveSettings()
+    {
+        await JS.InvokeVoidAsync("localStorage.setItem", "rs_botid", _botId);
+        await JS.InvokeVoidAsync("localStorage.setItem", "rs_autopost", _autoPost ? "1" : "0");
+    }
+
+    private async Task OnAutoPostChanged(ChangeEventArgs e)
+    {
+        _autoPost = e.Value is bool b && b;
+        await SaveSettings();
+    }
+
+    private void AddPlayer()
+    {
+        _players.Add(new PlayerEntry { Id = _nextId++, Name = "", ScoreText = "0" });
+    }
+
+    private void RemovePlayer(int id)
+    {
+        _players.RemoveAll(p => p.Id == id);
+    }
+
+    private async Task Randomize()
+    {
+        var active = _players.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
+        if (active.Count < 2)
+        {
+            await JS.InvokeVoidAsync("alert", "Please add at least 2 players with names.");
+            return;
+        }
+
+        _clickCount++;
+
+        var shuffled = active.ToList();
+        var rng = new Random();
+        for (int i = shuffled.Count - 1; i > 0; i--)
+        {
+            int j = rng.Next(i + 1);
+            (shuffled[i], shuffled[j]) = (shuffled[j], shuffled[i]);
+        }
+
+        var teams = new List<TeamResult>();
+        for (int i = 0; i < shuffled.Count; i += _teamSize)
+        {
+            var chunk = shuffled.Skip(i).Take(_teamSize)
+                .Select(p => new PlayerSnapshot { Name = p.Name, Score = p.Score })
+                .ToList();
+            teams.Add(new TeamResult
+            {
+                Number = teams.Count + 1,
+                Players = chunk,
+                Total = chunk.Sum(p => p.Score),
+                Color = TeamColors[teams.Count % TeamColors.Length]
+            });
+        }
+
+        double minTotal = teams.Min(t => t.Total);
+        foreach (var t in teams)
+            t.IsWinner = t.Total == minTotal;
+
+        var result = new RandomizationResult
+        {
+            Iteration = _clickCount,
+            Time = DateTime.Now.ToString("h:mm:ss tt"),
+            Teams = teams,
+            IsUneven = shuffled.Count % _teamSize != 0
+        };
+
+        _results.Insert(0, result);
+
+        if (_autoPost && !string.IsNullOrWhiteSpace(_botId))
+        {
+            await SaveSettings();
+            await PostToGroupMe(result, showSuccess: false);
+        }
+    }
+
+    private async Task ClearAll()
+    {
+        var ok = await JS.InvokeAsync<bool>("confirm", "Clear all results and reset the player list to defaults?");
+        if (!ok) return;
+
+        _results.Clear();
+        _clickCount = 0;
+        _players.Clear();
+        _nextId = 1;
+
+        for (int i = 1; i <= 6; i++)
+            _players.Add(new PlayerEntry { Id = _nextId++, Name = $"Player{i}", ScoreText = "0" });
+    }
+
+    private async Task SendToGroupMe(RandomizationResult result)
+    {
+        if (string.IsNullOrWhiteSpace(_botId))
+        {
+            await JS.InvokeVoidAsync("alert", "Enter a GroupMe Bot ID in the bar at the top.");
+            return;
+        }
+        await SaveSettings();
+        await PostToGroupMe(result, showSuccess: true);
+    }
+
+    private async Task PostToGroupMe(RandomizationResult result, bool showSuccess)
+    {
+        try
+        {
+            var response = await Http.PostAsJsonAsync(
+                "https://api.groupme.com/v3/bots/post",
+                new { bot_id = _botId, text = FormatGroupMeMessage(result) });
+
+            if (response.IsSuccessStatusCode)
+            {
+                if (showSuccess)
+                    await JS.InvokeVoidAsync("alert", "Results sent to GroupMe!");
+            }
+            else
+            {
+                await JS.InvokeVoidAsync("alert",
+                    $"GroupMe returned {(int)response.StatusCode}. Double-check your Bot ID.");
+            }
+        }
+        catch (Exception ex)
+        {
+            await JS.InvokeVoidAsync("alert", $"Could not reach GroupMe:\n{ex.Message}");
+        }
+    }
+
+    private string FormatGroupMeMessage(RandomizationResult result)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"🎲 Random Teams #{result.Iteration} | {result.Time}");
+        if (result.IsUneven) sb.AppendLine("⚠️ Note: Teams are uneven");
+        sb.AppendLine();
+        foreach (var team in result.Teams.OrderBy(t => t.Number))
+        {
+            string prefix = team.IsWinner ? "🏆 " : "";
+            string suffix = team.IsWinner ? " — WINNER!" : "";
+            sb.AppendLine($"{prefix}Team {team.Number}: {FormatScore(team.Total)} pts{suffix}");
+            sb.AppendLine("  " + string.Join(", ", team.Players.Select(p => $"{p.Name} ({FormatScore(p.Score)})")));
+            sb.AppendLine();
+        }
+        return sb.ToString().Trim();
+    }
+
+    private static string FormatScore(double score) =>
+        score % 1 == 0 ? score.ToString("0") : score.ToString("0.##");
+}
