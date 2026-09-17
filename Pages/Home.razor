@@ -74,7 +74,17 @@
                     {
                         <div class="team-card @team.PlaceClass">
                             <div class="team-header">
-                                <span class="place-label @team.HeadingClass">@team.PlaceHeading</span>
+                                <span class="place-label @team.HeadingClass">
+                                    @if (team.FlankEmoji.Length > 0)
+                                    {
+                                        <span class="place-emoji">@team.FlankEmoji</span>
+                                    }
+                                    <span class="place-text">@team.PlaceLabel</span>
+                                    @if (team.FlankEmoji.Length > 0)
+                                    {
+                                        <span class="place-emoji">@team.FlankEmoji</span>
+                                    }
+                                </span>
                             </div>
                             <div class="team-players">
                                 @foreach (var p in team.Players)
@@ -177,10 +187,11 @@
             : IsLast ? "Loser"
             : $"{Ordinal(Place)} Place";
 
-        public string PlaceHeading =>
-            IsWinner ? $"🏆 {PlaceLabel}"
-            : IsLast ? $"😭 {PlaceLabel} 😭"
-            : PlaceLabel;
+        /// <summary>
+        /// Mirrored on both sides of the label. Kept as separate elements from
+        /// the text so the crying faces can be scaled up on their own.
+        /// </summary>
+        public string FlankEmoji => IsWinner ? "🏆" : IsLast ? "😭😭" : "";
 
         /// <summary>
         /// Extra header styling: the outright winner's color strobes, the

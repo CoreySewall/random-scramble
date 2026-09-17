@@ -291,7 +291,7 @@ main {
 
 .teams-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(195px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(212px, 1fr));
     gap: 10px;
     padding: 12px;
 }
@@ -304,7 +304,9 @@ main {
 }
 
 .team-header {
-    padding: 10px 12px;
+    padding: 6px 12px;
+    min-height: 46px;
+    box-sizing: border-box;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -312,16 +314,34 @@ main {
     color: #fff;
 }
 
-/* The finishing place is the whole header now — no team number */
+/* The finishing place is the whole header now — no team number.
+   min-height above keeps every header the same height, so the loser's
+   larger emoji don't make that one card taller than its neighbours. */
 .place-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
     font-size: 16px;
     font-weight: 600;
     letter-spacing: 0.2px;
-    min-width: 0;
+    line-height: 1;
+}
+
+.place-text {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+.place-emoji {
+    flex: 0 0 auto;
+    line-height: 1;
+}
+
+/* The crying faces read small beside the text, so scale just those up */
+.loser-gold .place-emoji,
+.loser-gold-dark .place-emoji { font-size: 1.45em; }
 
 /* Header + border keyed to finishing place:
    1st blue, 2nd red, 3rd white, everything past that dim and faded. */
@@ -566,5 +586,5 @@ main {
     .gm-hint { display: none; }
     .col-headers,
     .player-row { grid-template-columns: 28px 1fr 72px 44px; }
-    .teams-grid { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+    .teams-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
 }
