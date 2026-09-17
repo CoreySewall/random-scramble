@@ -291,7 +291,7 @@ main {
 
 .teams-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(195px, 1fr));
     gap: 10px;
     padding: 12px;
 }
@@ -303,26 +303,68 @@ main {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
-.team-winner { border-color: #EAB308; }
-
 .team-header {
     padding: 10px 12px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 6px;
+    justify-content: center;
+    background: var(--card-alt);
+    color: #fff;
 }
 
-.team-name { color: #fff; font-weight: 700; font-size: 14px; }
-
-.winner-badge {
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 10px;
-    padding: 2px 8px;
-    font-size: 11px;
-    color: #fff;
+/* The finishing place is the whole header now — no team number */
+.place-label {
+    font-size: 16px;
     font-weight: 600;
+    letter-spacing: 0.2px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* Header + border keyed to finishing place:
+   1st blue, 2nd red, 3rd white, everything past that dim and faded. */
+.team-card.place-1 { border-color: #60A5FA; }
+.team-card.place-1 .team-header { background: #2563EB; }
+.team-card.place-1 .place-label { font-weight: 800; font-size: 17px; }
+
+.team-card.place-2 { border-color: #F87171; }
+.team-card.place-2 .team-header { background: #DC2626; }
+
+.team-card.place-3 { border-color: #F8FAFC; }
+.team-card.place-3 .team-header { background: #E2E8F0; color: #0D1117; }
+
+.team-card.place-faded { border-color: #262D3D; box-shadow: none; }
+.team-card.place-faded .team-header { background: #1B2130; color: #55627A; }
+
+/* =====================================================
+   WINNER STROBE / LOSER GOLD
+   The winner's color cycles smoothly rather than hard-
+   flashing, and stays under 3 changes per second. The
+   loser is static gold.
+   ===================================================== */
+
+@keyframes winner-strobe {
+    0%   { color: #FFFFFF; }
+    25%  { color: #FDE047; }
+    50%  { color: #A7F3D0; }
+    75%  { color: #FDE047; }
+    100% { color: #FFFFFF; }
+}
+
+.place-label.strobe-winner {
+    animation: winner-strobe 1.6s ease-in-out infinite;
+    text-shadow: 0 0 8px rgba(255, 255, 255, 0.35);
+}
+
+.place-label.loser-gold { color: #FFD700; }
+
+/* Darker gold so it still reads on the near-white 3rd-place header */
+.place-label.loser-gold-dark { color: #8A6D0B; }
+
+@media (prefers-reduced-motion: reduce) {
+    .place-label.strobe-winner { animation: none; }
 }
 
 .team-players { background: var(--card); padding: 10px 12px; }
@@ -524,5 +566,5 @@ main {
     .gm-hint { display: none; }
     .col-headers,
     .player-row { grid-template-columns: 28px 1fr 72px 44px; }
-    .teams-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+    .teams-grid { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
 }

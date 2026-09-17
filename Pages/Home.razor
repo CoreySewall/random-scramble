@@ -61,24 +61,20 @@
                     </div>
                 </div>
 
-                @if (result.IsUneven)
+                @if (result.HasFillIns)
                 {
                     <div class="warning-banner">
                         <div class="warning-bar"></div>
-                        <div class="warning-text">⚠️ Are you missing a player? Total player count makes uneven teams.</div>
+                        <div class="warning-text">⚠️ @result.FillInNotice</div>
                     </div>
                 }
 
                 <div class="teams-grid">
                     @foreach (var team in result.Teams)
                     {
-                        <div class="team-card @(team.IsWinner ? "team-winner" : "")">
-                            <div class="team-header" style="background: @team.Color">
-                                <span class="team-name">Team @team.Number</span>
-                                @if (team.IsWinner)
-                                {
-                                    <span class="winner-badge">🏆 Winner</span>
-                                }
+                        <div class="team-card @team.PlaceClass">
+                            <div class="team-header">
+                                <span class="place-label @team.HeadingClass">@team.PlaceHeading</span>
                             </div>
                             <div class="team-players">
                                 @foreach (var p in team.Players)
@@ -161,8 +157,52 @@
         public int Number { get; set; }
         public List<PlayerSnapshot> Players { get; set; } = new();
         public double Total { get; set; }
-        public bool IsWinner { get; set; }
-        public string Color { get; set; } = "#6366F1";
+        public int Place { get; set; }
+        public bool IsTie { get; set; }
+        public bool IsWinner => Place == 1;
+
+        /// <summary>Outright last, not tied for it.</summary>
+        public bool IsLast { get; set; }
+
+        // 1st blue, 2nd red, 3rd white, everything past that dim and faded
+        public string PlaceClass => Place is >= 1 and <= 3 ? $"place-{Place}" : "place-faded";
+
+        /// <summary>
+        /// "Winner" for an outright win and "Loser" for outright last,
+        /// otherwise "Tie 1st Place" / "2nd Place" / …
+        /// </summary>
+        public string PlaceLabel =>
+            IsTie ? $"Tie {Ordinal(Place)} Place"
+            : IsWinner ? "Winner"
+            : IsLast ? "Loser"
+            : $"{Ordinal(Place)} Place";
+
+        public string PlaceHeading =>
+            IsWinner ? $"🏆 {PlaceLabel}"
+            : IsLast ? $"😭 {PlaceLabel} 😭"
+            : PlaceLabel;
+
+        /// <summary>
+        /// Extra header styling: the outright winner's color strobes, the
+        /// outright loser sits in static gold — darkened on the near-white
+        /// 3rd-place card so it stays legible.
+        /// </summary>
+        public string HeadingClass =>
+            IsWinner && !IsTie ? "strobe-winner"
+            : IsLast ? (Place == 3 ? "loser-gold-dark" : "loser-gold")
+            : "";
+
+        private static string Ordinal(int n)
+        {
+            if (n % 100 is >= 11 and <= 13) return $"{n}th";
+            return (n % 10) switch
+            {
+                1 => $"{n}st",
+                2 => $"{n}nd",
+                3 => $"{n}rd",
+                _ => $"{n}th"
+            };
+        }
     }
 
     private class RandomizationResult
@@ -170,14 +210,27 @@
         public int Iteration { get; set; }
         public string Time { get; set; } = "";
         public List<TeamResult> Teams { get; set; } = new();
-        public bool IsUneven { get; set; }
-    }
+        public int PlayerCount { get; set; }
+        public int TeamSize { get; set; }
 
-    private static readonly string[] TeamColors =
-    {
-        "#6366F1", "#EC4899", "#10B981", "#F59E0B", "#3B82F6",
-        "#8B5CF6", "#EF4444", "#14B8A6", "#F97316", "#84CC16"
-    };
+        /// <summary>Players given a second entry to even out the teams.</summary>
+        public List<string> FillInNames { get; set; } = new();
+
+        public bool HasFillIns => FillInNames.Count > 0;
+
+        public string FillInNotice => !HasFillIns
+            ? ""
+            : $"{PlayerCount} players don't split evenly into teams of {TeamSize} — "
+              + $"{NameList(FillInNames)} {(FillInNames.Count == 1 ? "has" : "have")} "
+              + "the lowest score and played twice to even things out. Missing a player?";
+
+        private static string NameList(List<string> names) => names.Count switch
+        {
+            1 => names[0],
+            2 => $"{names[0]} and {names[1]}",
+            _ => string.Join(", ", names.Take(names.Count - 1)) + $" and {names[^1]}"
+        };
+    }
 
     private List<PlayerEntry> _players = new();
     private List<RandomizationResult> _results = new();
@@ -216,6 +269,8 @@
 
     private void AddPlayer()
     {
+        // Roster change makes the results on screen stale
+        _results.Clear();
         _players.Add(new PlayerEntry { Id = _nextId++, Name = "", ScoreText = "0" });
     }
 
@@ -235,13 +290,13 @@
 
         _clickCount++;
 
-        var shuffled = active.ToList();
         var rng = new Random();
-        for (int i = shuffled.Count - 1; i > 0; i--)
-        {
-            int j = rng.Next(i + 1);
-            (shuffled[i], shuffled[j]) = (shuffled[j], shuffled[i]);
-        }
+
+        // An odd player count can't fill teams of N, so the lowest
+        // individual scorer(s) get a second entry and play on two teams.
+        var fillIns = PickFillIns(active, _teamSize, rng);
+        var entries = active.Concat(fillIns).ToList();
+        var shuffled = ShuffleAcrossTeams(entries, _teamSize, rng);
 
         var teams = new List<TeamResult>();
         for (int i = 0; i < shuffled.Count; i += _teamSize)
@@ -253,21 +308,22 @@
             {
                 Number = teams.Count + 1,
                 Players = chunk,
-                Total = chunk.Sum(p => p.Score),
-                Color = TeamColors[teams.Count % TeamColors.Length]
+                Total = chunk.Sum(p => p.Score)
             });
         }
 
-        double minTotal = teams.Min(t => t.Total);
-        foreach (var t in teams)
-            t.IsWinner = t.Total == minTotal;
+        // Best (lowest) total finishes first, so results read top-down by place
+        teams = teams.OrderBy(t => t.Total).ToList();
+        AssignPlaces(teams);
 
         var result = new RandomizationResult
         {
             Iteration = _clickCount,
             Time = DateTime.Now.ToString("h:mm:ss tt"),
             Teams = teams,
-            IsUneven = shuffled.Count % _teamSize != 0
+            PlayerCount = active.Count,
+            TeamSize = _teamSize,
+            FillInNames = fillIns.Select(p => p.Name).ToList()
         };
 
         _results.Insert(0, result);
@@ -277,6 +333,88 @@
             await SaveSettings();
             await PostToGroupMe(result, showSuccess: false);
         }
+    }
+
+    /// <summary>
+    /// Extra entries needed to make the player count divide evenly by team
+    /// size, taken lowest individual score first with ties broken randomly.
+    /// Empty when the teams already come out even.
+    /// </summary>
+    private static List<PlayerEntry> PickFillIns(List<PlayerEntry> players, int teamSize, Random rng)
+    {
+        int remainder = players.Count % teamSize;
+        if (remainder == 0) return new List<PlayerEntry>();
+
+        var lowestFirst = players
+            .Select(p => new { Player = p, Tiebreak = rng.Next() })
+            .OrderBy(x => x.Player.Score)
+            .ThenBy(x => x.Tiebreak)
+            .Select(x => x.Player)
+            .ToList();
+
+        // Wraps if one short player list has to cover several open slots
+        return Enumerable.Range(0, teamSize - remainder)
+            .Select(i => lowestFirst[i % lowestFirst.Count])
+            .ToList();
+    }
+
+    /// <summary>
+    /// Fisher-Yates shuffle, retried so a player holding two entries lands
+    /// on two different teams rather than being paired with themselves.
+    /// Bounded, since some splits make that impossible.
+    /// </summary>
+    private static List<PlayerEntry> ShuffleAcrossTeams(List<PlayerEntry> entries, int teamSize, Random rng)
+    {
+        var shuffled = entries.ToList();
+
+        for (int attempt = 0; attempt < 200; attempt++)
+        {
+            for (int i = shuffled.Count - 1; i > 0; i--)
+            {
+                int j = rng.Next(i + 1);
+                (shuffled[i], shuffled[j]) = (shuffled[j], shuffled[i]);
+            }
+
+            if (!HasRepeatWithinTeam(shuffled, teamSize)) break;
+        }
+
+        return shuffled;
+    }
+
+    private static bool HasRepeatWithinTeam(List<PlayerEntry> entries, int teamSize)
+    {
+        for (int i = 0; i < entries.Count; i += teamSize)
+        {
+            var team = entries.Skip(i).Take(teamSize).ToList();
+            if (team.Distinct().Count() != team.Count) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Stamps each team with its finishing place using standard competition
+    /// ranking, so a two-way tie for 1st is followed by 3rd. Expects
+    /// <paramref name="teams"/> already sorted best-score-first.
+    /// </summary>
+    private static void AssignPlaces(List<TeamResult> teams)
+    {
+        int place = 1;
+        for (int i = 0; i < teams.Count; i++)
+        {
+            // Tolerance so decimal scores that sum with float drift still tie
+            if (i > 0 && Math.Abs(teams[i].Total - teams[i - 1].Total) > 1e-9)
+                place = i + 1;
+            teams[i].Place = place;
+        }
+
+        foreach (var team in teams)
+            team.IsTie = teams.Count(t => t.Place == team.Place) > 1;
+
+        // Dead last on its own earns the "Loser" tag; a tie for last doesn't
+        int lastPlace = teams[^1].Place;
+        foreach (var team in teams)
+            team.IsLast = teams.Count > 1 && team.Place == lastPlace && !team.IsTie;
     }
 
     private async Task ClearAll()
@@ -333,12 +471,14 @@
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"🎲 Random Teams #{result.Iteration} | {result.Time}");
-        if (result.IsUneven) sb.AppendLine("⚠️ Note: Teams are uneven");
+        if (result.HasFillIns) sb.AppendLine($"⚠️ {result.FillInNotice}");
         sb.AppendLine();
-        foreach (var team in result.Teams.OrderBy(t => t.Number))
+        foreach (var team in result.Teams)
         {
-            string prefix = team.IsWinner ? "🏆 " : "";
-            string suffix = team.IsWinner ? " — WINNER!" : "";
+            string prefix = team.IsWinner ? "🏆 " : team.IsLast ? "😭 " : "";
+            string suffix = team.IsWinner && !team.IsTie ? " — WINNER!"
+                : team.IsLast ? " — LOSER!"
+                : $" — {team.PlaceLabel}";
             sb.AppendLine($"{prefix}Team {team.Number}: {FormatScore(team.Total)} pts{suffix}");
             sb.AppendLine("  " + string.Join(", ", team.Players.Select(p => $"{p.Name} ({FormatScore(p.Score)})")));
             sb.AppendLine();
