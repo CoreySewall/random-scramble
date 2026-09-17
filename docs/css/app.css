@@ -249,6 +249,13 @@ main {
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 }
 
+/* Most recent randomization. The ring is drawn with box-shadow rather than a
+   thicker border so the card doesn't shift when it stops being the newest. */
+.result-card.result-latest {
+    border-color: #3B82F6;
+    box-shadow: 0 0 0 1px #3B82F6, 0 4px 20px rgba(59, 130, 246, 0.22);
+}
+
 .result-header {
     background: var(--card);
     padding: 12px 16px;

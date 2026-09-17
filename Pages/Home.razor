@@ -50,9 +50,11 @@
             </div>
         }
 
-        @foreach (var result in _results)
+        @* Newest result is inserted at index 0, so index 0 gets the blue border *@
+        @for (int r = 0; r < _results.Count; r++)
         {
-            <div class="result-card" @key="result.Iteration">
+            var result = _results[r];
+            <div class="result-card @(r == 0 ? "result-latest" : "")" @key="result.Iteration">
                 <div class="result-header">
                     <span class="result-title">Randomization #@result.Iteration</span>
                     <div class="result-header-right">
