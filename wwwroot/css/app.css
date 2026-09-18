@@ -465,6 +465,10 @@ main {
     transition: background 0.1s;
 }
 
+/* Zebra stripe. Same specificity as the hover rule below, so it has to come
+   first for hover to win on a striped row. */
+.player-row:nth-child(even) { background: #1A1F2B; }
+
 .player-row:hover { background: #1A2438; }
 
 .row-num {
@@ -514,6 +518,10 @@ main {
 .sheet-footer {
     padding: 12px 16px;
     border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
 }
 
 .btn-add {
@@ -530,6 +538,50 @@ main {
 }
 
 .btn-add:hover { background: #1E1B4B; border-color: #6366F1; color: var(--accent); }
+
+/* Mic dictation toggle — pulses red while the microphone is live */
+.btn-mic {
+    height: 38px;
+    padding: 0 16px;
+    background: transparent;
+    border: 1.5px solid var(--border-mid);
+    border-radius: 8px;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.btn-mic:hover { background: #1E1B4B; border-color: #6366F1; color: var(--accent); }
+
+.btn-mic.listening {
+    background: #3D1A1A;
+    border-color: #EF4444;
+    color: #FCA5A5;
+    animation: mic-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes mic-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.5; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .btn-mic.listening { animation: none; }
+}
+
+.speech-status {
+    font-size: 12px;
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    flex: 1;
+}
 
 /* =====================================================
    Blazor infrastructure (dark-themed)

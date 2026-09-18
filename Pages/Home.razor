@@ -1,4 +1,5 @@
 @page "/"
+@implements IAsyncDisposable
 @inject HttpClient Http
 @inject IJSRuntime JS
 
@@ -145,6 +146,20 @@
 
         <div class="sheet-footer">
             <button class="btn-add" @onclick="AddPlayer">+ Add Player</button>
+
+            @if (_speechSupported)
+            {
+                <button class="btn-mic @(_listening ? "listening" : "")"
+                        @onclick="ToggleMic"
+                        title="Say a name then a score — &quot;Corey eighty five&quot; — and each one adds a row.">
+                    🎤 @(_listening ? "Listening…" : "Dictate")
+                </button>
+            }
+
+            @if (_speechStatus.Length > 0)
+            {
+                <span class="speech-status">@_speechStatus</span>
+            }
         </div>
     </section>
 </main>
@@ -253,19 +268,129 @@
     private string _botId = "";
     private bool _autoPost;
 
-    protected override void OnInitialized()
-    {
-        for (int i = 1; i <= 6; i++)
-            _players.Add(new PlayerEntry { Id = _nextId++, Name = $"Player{i}", ScoreText = "0" });
-    }
-
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
         _botId = await JS.InvokeAsync<string?>("localStorage.getItem", "rs_botid") ?? "";
         var ap = await JS.InvokeAsync<string?>("localStorage.getItem", "rs_autopost");
         _autoPost = ap == "1";
+
+        // Chrome and Edge only, so the mic button stays hidden elsewhere
+        _speechSupported = await JS.InvokeAsync<bool>("rsSpeech.isSupported");
+
         StateHasChanged();
+    }
+
+    // =====================================================
+    //  Mic dictation
+    // =====================================================
+
+    private DotNetObjectReference<Home>? _speechRef;
+    private bool _speechSupported;
+    private bool _listening;
+    private string _speechStatus = "";
+
+    /// <summary>A name heard with no score yet, carried into the next phrase.</summary>
+    private string _speechLeftover = "";
+
+    private async Task ToggleMic()
+    {
+        if (_listening)
+        {
+            _listening = false;
+            _speechStatus = "";
+            await JS.InvokeVoidAsync("rsSpeech.stop");
+            return;
+        }
+
+        _speechRef ??= DotNetObjectReference.Create(this);
+        _speechLeftover = "";
+
+        // Kicks off the browser's mic permission prompt on first use
+        var started = await JS.InvokeAsync<bool>("rsSpeech.start", _speechRef);
+
+        _listening = started;
+        _speechStatus = started
+            ? "Say a name then a score, e.g. \"Corey eighty five\"."
+            : "Couldn't start the microphone.";
+    }
+
+    [JSInvokable]
+    public void OnSpeechResult(string transcript, bool isFinal)
+    {
+        if (!isFinal)
+        {
+            _speechStatus = $"… {transcript.Trim()}";
+            StateHasChanged();
+            return;
+        }
+
+        var parsed = SpeechEntryParser.Parse($"{_speechLeftover} {transcript}");
+        _speechLeftover = parsed.Leftover;
+
+        if (parsed.Entries.Count > 0)
+        {
+            // Roster change makes the results on screen stale
+            _results.Clear();
+
+            foreach (var entry in parsed.Entries)
+                _players.Add(new PlayerEntry
+                {
+                    Id = _nextId++,
+                    Name = entry.Name,
+                    ScoreText = entry.ScoreText
+                });
+        }
+
+        _speechStatus = DictationStatus(parsed.Entries);
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void OnSpeechEnd()
+    {
+        _listening = false;
+        _speechLeftover = "";
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void OnSpeechError(string error)
+    {
+        _listening = false;
+        _speechStatus = error switch
+        {
+            "not-allowed" or "service-not-allowed" => "Microphone blocked — allow mic access for this site.",
+            "audio-capture" => "No microphone found.",
+            "network" => "Speech recognition needs a network connection.",
+            _ => $"Microphone stopped ({error})."
+        };
+        StateHasChanged();
+    }
+
+    private string DictationStatus(List<SpeechEntryParser.Entry> added)
+    {
+        if (_speechLeftover.Length > 0)
+            return $"Heard \"{_speechLeftover}\" — now say a score.";
+
+        if (added.Count == 0)
+            return "Didn't catch a name and score — try again.";
+
+        var last = added[^1];
+        return added.Count == 1
+            ? $"Added {last.Name} — {last.ScoreText}"
+            : $"Added {added.Count} players, last {last.Name} — {last.ScoreText}";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_listening)
+        {
+            try { await JS.InvokeVoidAsync("rsSpeech.stop"); }
+            catch (JSDisconnectedException) { }
+        }
+
+        _speechRef?.Dispose();
     }
 
     private async Task SaveSettings()
@@ -432,16 +557,13 @@
 
     private async Task ClearAll()
     {
-        var ok = await JS.InvokeAsync<bool>("confirm", "Clear all results and reset the player list to defaults?");
+        var ok = await JS.InvokeAsync<bool>("confirm", "Clear all results and remove every player?");
         if (!ok) return;
 
         _results.Clear();
         _clickCount = 0;
         _players.Clear();
         _nextId = 1;
-
-        for (int i = 1; i <= 6; i++)
-            _players.Add(new PlayerEntry { Id = _nextId++, Name = $"Player{i}", ScoreText = "0" });
     }
 
     private async Task SendToGroupMe(RandomizationResult result)
